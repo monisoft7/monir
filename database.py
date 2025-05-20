@@ -26,7 +26,6 @@ class DatabaseManager:
             raise
 
     def initialize_database(self):
-        """إنشاء الجداول إذا لم تكن موجودة"""
         tables = [
             """CREATE TABLE IF NOT EXISTS employees (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +38,7 @@ class DatabaseManager:
                 grade_date TEXT,
                 bonus INTEGER DEFAULT 0,
                 vacation_balance INTEGER DEFAULT 30,
+                emergency_vacation_balance INTEGER DEFAULT 12,
                 work_days TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -46,6 +46,8 @@ class DatabaseManager:
             """CREATE TABLE IF NOT EXISTS departments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE NOT NULL,
+                head_id INTEGER,
+                head_password TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS vacations (
@@ -53,12 +55,14 @@ class DatabaseManager:
                 employee_id INTEGER NOT NULL,
                 type TEXT NOT NULL,
                 subtype TEXT,
-                relation TEXT, 
+                relation TEXT,
                 start_date TEXT NOT NULL,
                 end_date TEXT NOT NULL,
                 duration INTEGER NOT NULL,
                 notes TEXT,
-                status TEXT DEFAULT 'pending',
+                status TEXT DEFAULT 'تحت الإجراء',
+                dept_approval TEXT DEFAULT 'تحت الإجراء',
+                dept_approver TEXT,
                 approved_by TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
@@ -88,27 +92,27 @@ class DatabaseManager:
         try:
             for table in tables:
                 self.cursor.execute(table)
-            
-            # إضافة الأقسام الافتراضية
-            default_depts = [
-                'الإدارة', 'التمريض', 
-                'المحاسبة', 'المختبر', 
-                'الصيدلة'
-            ]
-            
-            insert_query = """
-                INSERT OR IGNORE INTO departments 
-                (name) VALUES (?)
-            """
-            
+
+            # إضافة الأعمدة الجديدة إذا لم تكن موجودة
+            try:
+                self.cursor.execute("ALTER TABLE employees ADD COLUMN emergency_vacation_balance INTEGER DEFAULT 12")
+            except Exception:
+                pass
+
+            # إضافة أقسام افتراضية (حسب ما لديك)
+            default_depts = ['الإدارة', 'التمريض', 'المحاسبة', 'المختبر', 'الصيدلة']
+            insert_query = "INSERT OR IGNORE INTO departments (name) VALUES (?)"
             for dept in default_depts:
                 self.cursor.execute(insert_query, (dept,))
-            
+
             self.conn.commit()
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"خطأ في إنشاء الجداول: {e}")
             self.conn.rollback()
             raise
+
+
+
 
     def create_indexes(self):
         """إنشاء الفهارس لتحسين الأداء"""

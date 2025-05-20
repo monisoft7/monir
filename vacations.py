@@ -5,70 +5,93 @@ from PyQt6.QtWidgets import (
     QSpinBox, QInputDialog
 )
 from PyQt6.QtCore import QDate, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QFont, QColor, QBrush
 
 class VacationsTab(QWidget):
-    def __init__(self, db_manager):
+    def __init__(self, db_manager, user_role="manager", department_name=None):
         super().__init__()
         self.db = db_manager
+        self.user_role = user_role
+        self.department_name = department_name  # اسم القسم لرئيس القسم فقط
         self.setup_ui()
         self.load_employees()
         self.load_vacations()
 
     def setup_ui(self):
         main_layout = QVBoxLayout()
+        # ==== تحسين مظهر المجموعة ====
         input_group = QGroupBox("بيانات الإجازة")
         input_group.setStyleSheet("""
             QGroupBox {
-                background-color: #f9f9f9;
-                border: 1px solid #bdbdbd;
-                border-radius: 8px;
-                margin-top: 8px;
+                background-color: #f5faff;
+                border: 1.5px solid #2f80ed;
+                border-radius: 10px;
+                margin-top: 12px;
+                font: bold 14px "Cairo", "Tahoma";
             }
-            QGroupBox::title {
+            QGroupBox:title {
                 subcontrol-origin: margin;
-                subcontrol-position: top center;
-                padding: 0 8px;
-                color: #2e7d32;
-                font-size: 16px;
-                font-weight: bold;
+                subcontrol-position: top right;
+                padding: 0 6px;
+                background: #2f80ed;
+                color: white;
+                border-radius: 6px;
             }
         """)
         input_form = QFormLayout()
+        input_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.employee_combo = QComboBox()
+        self.employee_combo.setStyleSheet("QComboBox { font-size: 13px; }")
         input_form.addRow("الموظف:", self.employee_combo)
 
         self.vacation_type = QComboBox()
         self.vacation_type.addItems([
-            "سنوية", "وفاة", "حج",
-            "زواج", "وضع", "مرضية"
+            "سنوية", "طارئة", "وفاة", "حج", "زواج", "وضع", "مرضية"
         ])
+        self.vacation_type.setStyleSheet("QComboBox { font-size: 13px; }")
         self.vacation_type.currentTextChanged.connect(self.handle_vacation_type_change)
         input_form.addRow("نوع الإجازة:", self.vacation_type)
 
         self.death_type_combo = QComboBox()
         self.death_type_combo.addItems(["وفاة من الدرجة الأولى", "وفاة من الدرجة الثانية"])
         self.death_type_combo.setVisible(False)
+        self.death_type_combo.setStyleSheet("QComboBox { font-size: 13px; }")
         self.death_type_combo.currentTextChanged.connect(self.update_death_vacation_duration)
         input_form.addRow("نوع الوفاة:", self.death_type_combo)
 
-        # نوع الوضع (عادي/توأم)
         self.birth_type_combo = QComboBox()
         self.birth_type_combo.addItems(["وضع عادي", "وضع توأم"])
         self.birth_type_combo.setVisible(False)
+        self.birth_type_combo.setStyleSheet("QComboBox { font-size: 13px; }")
         self.birth_type_combo.currentTextChanged.connect(self.update_birth_vacation_duration)
         input_form.addRow("نوع الوضع:", self.birth_type_combo)
 
         dates_group = QGroupBox("فترة الإجازة")
+        dates_group.setStyleSheet("""
+            QGroupBox {
+                background: #eaf1fa;
+                border: 1px solid #a8c7e9;
+                border-radius: 8px;
+                font: bold 12px "Cairo", "Tahoma";
+            }
+            QGroupBox:title {
+                background: #eaf1fa;
+                color: #2f80ed;
+                border-radius: 4px;
+                padding: 0 4px;
+            }
+        """)
         dates_layout = QHBoxLayout()
         self.start_date = QDateEdit(QDate.currentDate())
         self.start_date.setCalendarPopup(True)
+        self.start_date.setStyleSheet("background: #fff;")
         self.start_date.dateChanged.connect(self.update_duration)
         dates_layout.addWidget(QLabel("من:"))
         dates_layout.addWidget(self.start_date)
         self.end_date = QDateEdit(QDate.currentDate())
         self.end_date.setCalendarPopup(True)
+        self.end_date.setStyleSheet("background: #fff;")
         self.end_date.dateChanged.connect(self.update_duration)
         dates_layout.addWidget(QLabel("إلى:"))
         dates_layout.addWidget(self.end_date)
@@ -77,26 +100,26 @@ class VacationsTab(QWidget):
 
         self.days_count = QSpinBox()
         self.days_count.setRange(1, 365)
-        self.days_count.setReadOnly(True)
+        self.days_count.setReadOnly(False)
+        self.days_count.setStyleSheet("background: #fafeff; font-weight: bold; font-size: 13px;")
         input_form.addRow("المدة (أيام):", self.days_count)
 
         self.notes_input = QLineEdit()
         self.notes_input.setPlaceholderText("ملاحظات إضافية...")
+        self.notes_input.setStyleSheet("background: #fafeff; font-size: 13px;")
         input_form.addRow("ملاحظات:", self.notes_input)
 
-        self.save_btn = QPushButton("حفظ الإجازة")
+        self.save_btn = QPushButton("💾 حفظ الإجازة")
         self.save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #388e3c;
+                background-color: #2f80ed;
                 color: white;
                 font-weight: bold;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 14px;
+                border-radius: 8px;
+                padding: 7px 16px;
+                font-size: 15px;
             }
-            QPushButton:hover {
-                background-color: #2e7d32;
-            }
+            QPushButton:hover { background-color: #1366d6; }
         """)
         self.save_btn.clicked.connect(self.save_vacation)
         input_form.addRow(self.save_btn)
@@ -104,33 +127,41 @@ class VacationsTab(QWidget):
         input_group.setLayout(input_form)
         main_layout.addWidget(input_group)
 
+        # ==== جدول الإجازات ====
         self.vacations_table = QTableWidget()
-        self.vacations_table.setColumnCount(9)
+        self.vacations_table.setColumnCount(11)
         self.vacations_table.setHorizontalHeaderLabels([
-            "ID", "الموظف", "النوع", "من", "إلى",
-            "المدة", "الحالة", "الإجراء", "إلغاء"
+            "م", "الموظف", "النوع", "من", "إلى",
+            "المدة", "حالة المدير", "حالة رئيس القسم", "موافقة", "رفض", "إلغاء"
         ])
-        self.vacations_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.vacations_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.vacations_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.vacations_table.setSortingEnabled(True)
         self.vacations_table.setStyleSheet("""
             QTableWidget {
-                font-size: 14px;
-                selection-background-color: #4CAF50;
+                background: #fff;
+                border-radius: 10px;
+                font-size: 13px;
             }
             QHeaderView::section {
-                background-color: #607D8B;
-                color: white;
-                padding: 5px;
+                background: #2f80ed;
+                color: #fff;
                 font-weight: bold;
+                border: none;
+                border-radius: 0;
+                padding: 5px 0;
             }
         """)
-        self.vacations_table.verticalHeader().setDefaultSectionSize(38)
-
+        self.vacations_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.vacations_table.horizontalHeader().setStretchLastSection(True)
+        self.vacations_table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        self.vacations_table.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        self.vacations_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.vacations_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.vacations_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.vacations_table.setWordWrap(True)
+        self.vacations_table.horizontalHeader().setSectionsMovable(True)
         main_layout.addWidget(QLabel("سجل الإجازات:"))
         main_layout.addWidget(self.vacations_table)
         self.setLayout(main_layout)
+        self.setFont(QFont("Cairo", 11))
         self.update_duration()
 
     def handle_vacation_type_change(self, vac_type):
@@ -139,38 +170,66 @@ class VacationsTab(QWidget):
         today = QDate.currentDate()
         self.start_date.setDate(today)
         self.end_date.setDate(today)
-        if vac_type == "حج":
+        if vac_type == "طارئة":
+            self.days_count.setRange(1, 3)
+            self.days_count.setValue(1)
+            self.days_count.setReadOnly(False)
+        elif vac_type == "سنوية":
+            self.days_count.setRange(1, 90)
+            self.days_count.setValue(1)
+            self.days_count.setReadOnly(False)
+        elif vac_type == "حج":
+            self.days_count.setRange(20, 20)
             self.days_count.setValue(20)
+            self.days_count.setReadOnly(True)
         elif vac_type == "زواج":
+            self.days_count.setRange(14, 14)
             self.days_count.setValue(14)
+            self.days_count.setReadOnly(True)
         elif vac_type == "وضع":
             self.update_birth_vacation_duration()
         elif vac_type == "مرضية":
+            self.days_count.setRange(1, 30)
             self.days_count.setValue(1)
-        elif vac_type == "سنوية":
-            self.days_count.setValue(1)
+            self.days_count.setReadOnly(False)
         elif vac_type == "وفاة":
             self.update_death_vacation_duration()
         else:
-            self.days_count.setValue(1)
+            self.days_count.setReadOnly(False)
 
     def update_death_vacation_duration(self):
         if self.death_type_combo.currentText() == "وفاة من الدرجة الأولى":
+            self.days_count.setRange(7, 7)
             self.days_count.setValue(7)
+            self.days_count.setReadOnly(True)
         else:
+            self.days_count.setRange(3, 3)
             self.days_count.setValue(3)
+            self.days_count.setReadOnly(True)
 
     def update_birth_vacation_duration(self):
         if self.birth_type_combo.currentText() == "وضع توأم":
-            self.days_count.setValue(16 * 7)
+            self.days_count.setRange(112, 112)
+            self.days_count.setValue(112)
+            self.days_count.setReadOnly(True)
         else:
-            self.days_count.setValue(14 * 7)
+            self.days_count.setRange(98, 98)
+            self.days_count.setValue(98)
+            self.days_count.setReadOnly(True)
 
     def load_employees(self):
         try:
-            self.db.execute_query(
-                "SELECT id, name FROM employees ORDER BY name"
-            )
+            if self.user_role == "department_head" and self.department_name:
+                # تحميل فقط موظفي القسم
+                self.db.execute_query(
+                    "SELECT id, name FROM employees WHERE department=? ORDER BY name",
+                    (self.department_name,)
+                )
+            else:
+                # تحميل جميع الموظفين
+                self.db.execute_query(
+                    "SELECT id, name FROM employees ORDER BY name"
+                )
             employees = self.db.cursor.fetchall()
             self.employee_combo.clear()
             for emp_id, name in employees:
@@ -225,19 +284,34 @@ class VacationsTab(QWidget):
                         return
                     if relation == "زوج":
                         duration = 130
+                        self.days_count.setValue(130)
                 else:
                     relation = "أقارب آخرون"
                 self.update_death_vacation_duration()
-                duration = self.days_count.value() if relation != "زوج" else 130
 
             birth_type = None
             if vac_type == "وضع":
                 birth_type = self.birth_type_combo.currentText()
-                # أضف نوع الوضع للملاحظة
                 if birth_type == "وضع توأم":
-                    notes = (notes + "\n" if notes else "") + "نوع الوضع: توأم"
+                    duration = 112
                 else:
-                    notes = (notes + "\n" if notes else "") + "نوع الوضع: عادي"
+                    duration = 98
+                self.days_count.setValue(duration)
+                notes = (notes + "\n" if notes else "") + f"نوع الوضع: {birth_type}"
+
+            # تحقق من الرصيد للإجازة الطارئة والسنوية
+            if vac_type == "طارئة":
+                self.db.execute_query("SELECT emergency_vacation_balance FROM employees WHERE id=?", (emp_id,))
+                balance = self.db.cursor.fetchone()[0]
+                if duration > balance:
+                    QMessageBox.warning(self, "رصيد غير كافٍ", "رصيد الإجازة الطارئة غير كافٍ!")
+                    return
+            if vac_type == "سنوية":
+                self.db.execute_query("SELECT vacation_balance FROM employees WHERE id=?", (emp_id,))
+                balance = self.db.cursor.fetchone()[0]
+                if duration > balance:
+                    QMessageBox.warning(self, "رصيد غير كافٍ", "رصيد الإجازة السنوية غير كافٍ!")
+                    return
 
             errors = self.validate_vacation_data()
             if errors:
@@ -251,15 +325,14 @@ class VacationsTab(QWidget):
             query = """
                 INSERT INTO vacations (
                     employee_id, type, relation, start_date, end_date,
-                    duration, notes, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    duration, notes, status, dept_approval, dept_approver, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """
             params = (
                 emp_id, vac_type, relation, start_date, end_date,
-                duration, notes, 'pending'
+                duration, notes, 'تحت الإجراء', 'تحت الإجراء', None
             )
             self.db.execute_query(query, params, commit=True)
-            self.notify_manager(emp_id, vac_type, start_date, end_date)
             QMessageBox.information(
                 self, "تم بنجاح",
                 f"تم تقديم طلب الإجازة بنجاح\n"
@@ -276,197 +349,6 @@ class VacationsTab(QWidget):
                 f"حدث خطأ أثناء حفظ الإجازة:\n{str(e)}\n"
                 "الرجاء التأكد من صحة جميع البيانات والمحاولة مرة أخرى"
             )
-
-
-    def refresh_data(self):
-        """
-        دالة زر تحديث البيانات، تعيد تحميل جدول الإجازات
-        """
-        self.load_vacations()
-
-    def load_vacations(self):
-        """
-        تحميل جدول الإجازات مع معالجة جميع الأعمدة حتى لا تظهر صفوف ناقصة أو خانات مختفية،
-        مع دعم الترتيب التلقائي عند الضغط على رأس العمود.
-        """
-        try:
-            self.vacations_table.setRowCount(0)
-            query = """
-                SELECT v.id, e.name, v.type, v.start_date,
-                       v.end_date, v.duration, v.status, v.relation
-                FROM vacations v
-                JOIN employees e ON v.employee_id = e.id
-                ORDER BY v.start_date DESC
-            """
-            self.db.execute_query(query)
-            vacations = self.db.cursor.fetchall()
-            if not vacations:
-                self.vacations_table.setRowCount(1)
-                for col in range(9):
-                    self.vacations_table.setItem(0, col, QTableWidgetItem(''))
-                self.vacations_table.setSpan(0, 0, 1, self.vacations_table.columnCount())
-                self.vacations_table.setItem(0, 0, QTableWidgetItem("لا يوجد سجل إجازات"))
-                return
-
-            self.vacations_table.setRowCount(len(vacations))
-            for row_idx, row in enumerate(vacations):
-                vid, name, vtype, start, end, days, status, relation = row
-
-                # 0 - ID
-                self.vacations_table.setItem(row_idx, 0, QTableWidgetItem(str(vid) if vid else ''))
-                # 1 - الموظف
-                self.vacations_table.setItem(row_idx, 1, QTableWidgetItem(name if name else ''))
-                # 2 - النوع
-                if vtype == "وفاة" and relation:
-                    display_type = f"وفاة ({relation})"
-                else:
-                    display_type = vtype if vtype else ''
-                self.vacations_table.setItem(row_idx, 2, QTableWidgetItem(display_type))
-                # 3 - من
-                self.vacations_table.setItem(row_idx, 3, QTableWidgetItem(start if start else ''))
-                # 4 - إلى
-                self.vacations_table.setItem(row_idx, 4, QTableWidgetItem(end if end else ''))
-                # 5 - المدة
-                self.vacations_table.setItem(row_idx, 5, QTableWidgetItem(str(days) if days else ''))
-                # 6 - الحالة
-                self.vacations_table.setItem(row_idx, 6, QTableWidgetItem(status if status else ''))
-
-                # 7 - الإجراءات
-                btn_approve = QPushButton("موافقة")
-                btn_reject = QPushButton("رفض")
-                self.style_button(btn_approve, "#2196F3", "#1565C0", "#0D47A1")
-                self.style_button(btn_reject, "#E53935", "#B71C1C", "#880000")
-                btn_approve.clicked.connect(lambda _, vid=vid: self.update_status(vid, "موافق"))
-                btn_reject.clicked.connect(lambda _, vid=vid: self.update_status(vid, "مرفوض"))
-                btn_layout = QHBoxLayout()
-                btn_layout.setSpacing(4)
-                btn_layout.setContentsMargins(0, 0, 0, 0)
-                btn_layout.addWidget(btn_approve)
-                btn_layout.addWidget(btn_reject)
-                widget = QWidget()
-                widget.setLayout(btn_layout)
-                self.vacations_table.setCellWidget(row_idx, 7, widget)
-
-                # 8 - زر الإلغاء أو مكانه
-                if status == "موافق":
-                    btn_cancel = QPushButton("إلغاء الإجازة")
-                    self.style_button(btn_cancel, "#757575", "#616161", "#424242")
-                    btn_cancel.clicked.connect(lambda _, vid=vid, vtype=vtype, days=days, status=status: self.cancel_vacation(vid, vtype, days, status))
-                    cancel_widget = QWidget()
-                    cancel_layout = QHBoxLayout()
-                    cancel_layout.setContentsMargins(0, 0, 0, 0)
-                    cancel_layout.addWidget(btn_cancel)
-                    cancel_widget.setLayout(cancel_layout)
-                    self.vacations_table.setCellWidget(row_idx, 8, cancel_widget)
-                else:
-                    self.vacations_table.setCellWidget(row_idx, 8, QLabel("-"))
-
-                # لون الصف حسب الحالة
-                self.color_row_by_status(row_idx, status)
-
-        except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"خطأ في تحميل الإجازات: {str(e)}")
-
-
-    def cancel_vacation(self, vacation_id, vac_type, days, status):
-        try:
-            if status != "موافق":
-                QMessageBox.warning(self, "غير مسموح", "لا يمكن إلغاء إلا الإجازات الموافق عليها فقط.")
-                return
-            reply = QMessageBox.question(self, "تأكيد الإلغاء", "هل أنت متأكد من إلغاء هذه الإجازة؟ ستتم إعادة الأيام إلى الرصيد إذا كانت سنوية.", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-            self.db.execute_query("UPDATE vacations SET status='ملغاة' WHERE id=?", (vacation_id,), commit=True)
-            if vac_type == "سنوية":
-                self.db.execute_query("UPDATE employees SET vacation_balance = vacation_balance + ? WHERE id=(SELECT employee_id FROM vacations WHERE id=?)", (days, vacation_id), commit=True)
-            QMessageBox.information(self, "تم", "تم إلغاء الإجازة بنجاح.")
-            self.load_vacations()
-            self.update_notification_count()
-        except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء الإلغاء: {str(e)}")
-
-    def style_button(self, button, normal_color, hover_color, pressed_color):
-        """
-        تصميم مبسط وصغير للأزرار: ألوان واضحة، حجم صغير، حواف خفيفة، بدون ظل أو تكلف.
-        """
-        button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {normal_color};
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 2px 8px;
-                min-width: 65px;
-                min-height: 24px;
-                border: none;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {pressed_color};
-            }}
-        """)
-        button.setMinimumWidth(65)
-        button.setMinimumHeight(24)
-        button.setGraphicsEffect(None)  # لا ظل
-
-    def color_row_by_status(self, row_idx, status):
-        color = QColor(255, 255, 255)
-        if status == 'موافق':
-            color = QColor(200, 255, 200)
-        elif status == 'مرفوض':
-            color = QColor(255, 200, 200)
-        elif status == 'معلق':
-            color = QColor(255, 255, 200)
-        elif status == 'pending':
-            color = QColor(255, 255, 255)
-        for col in range(9):
-            if self.vacations_table.item(row_idx, col):
-                self.vacations_table.item(row_idx, col).setBackground(color)
-
-    def update_status(self, vacation_id, status):
-        """تحديث حالة الإجازة"""
-        try:
-            self.db.execute_query(
-                "SELECT employee_id, type, duration, status FROM vacations WHERE id = ?",
-                (vacation_id,), commit=False
-            )
-            emp_id, vac_type, duration, old_status = self.db.cursor.fetchone()
-
-            # فقط عند الموافقة على السنوية، تحقق الرصيد وخصم
-            if status == 'موافق' and vac_type == "سنوية":
-                self.db.execute_query(
-                    "SELECT vacation_balance FROM employees WHERE id=?", (emp_id,), commit=False
-                )
-                balance = self.db.cursor.fetchone()[0]
-                if duration > balance:
-                    QMessageBox.warning(self, "رصيد غير كافٍ", "لا يمكن الموافقة: رصيد الإجازات غير كافٍ لهذا الموظف!")
-                    return
-
-            self.db.execute_query(
-                "UPDATE vacations SET status = ? WHERE id = ?", (status, vacation_id), commit=True
-            )
-
-            # خصم الرصيد عند الموافقة فقط
-            if status == 'موافق' and vac_type == "سنوية":
-                self.db.execute_query(
-                    "UPDATE employees SET vacation_balance = vacation_balance - ? WHERE id = ?",
-                    (duration, emp_id), commit=True
-                )
-            # في حالة إرجاع الحالة من موافق لأي حالة أخرى
-            elif old_status == 'موافق' and status != 'موافق' and vac_type == "سنوية":
-                self.db.execute_query(
-                    "UPDATE employees SET vacation_balance = vacation_balance + ? WHERE id = ?",
-                    (duration, emp_id), commit=True
-                )
-
-            self.load_vacations()
-            self.update_notification_count()
-            QMessageBox.information(self, "تم", f"تم تغيير الحالة إلى {status}")
-        except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"حدث خطأ: {str(e)}")
 
     def check_vacation_conflict(self, emp_id, start_date, end_date):
         try:
@@ -488,27 +370,162 @@ class VacationsTab(QWidget):
             print(f"Error checking vacation conflict: {e}")
             return False
 
-    def notify_manager(self, emp_id, vac_type, start, end):
-        try:
-            self.db.execute_query("""
-                SELECT name FROM employees WHERE id = ?
-            """, (emp_id,), commit=False)
-            emp_name = self.db.cursor.fetchone()[0]
-            print(f"إشعار: طلب إجازة جديد من {emp_name} ({vac_type} من {start} إلى {end})")
-            self.update_notification_count()
-        except Exception as e:
-            print(f"Error sending notification: {e}")
+    def refresh_data(self):
+        self.load_vacations()
 
-    def update_notification_count(self):
+    def load_vacations(self):
+        self.vacations_table.setRowCount(0)
         try:
-            self.db.execute_query("""
-                SELECT COUNT(*) FROM vacations
-                WHERE status = 'pending'
-            """, commit=False)
-            count = self.db.cursor.fetchone()[0]
-            if count > 0:
-                self.notification_label.setText(f"لديك {count} طلبات إجازة بانتظار الموافقة")
+            # تحميل جميع أو فقط إجازات القسم
+            if self.user_role == "department_head" and self.department_name:
+                self.db.execute_query("""
+                    SELECT v.id, e.name, v.type, v.start_date, v.end_date, v.duration,
+                           v.status, v.dept_approval
+                    FROM vacations v
+                    JOIN employees e ON v.employee_id = e.id
+                    WHERE e.department=?
+                    ORDER BY v.start_date DESC
+                """, (self.department_name,))
             else:
-                self.notification_label.clear()
+                self.db.execute_query("""
+                    SELECT v.id, e.name, v.type, v.start_date, v.end_date, v.duration,
+                           v.status, v.dept_approval
+                    FROM vacations v
+                    JOIN employees e ON v.employee_id = e.id
+                    ORDER BY v.start_date DESC
+                """)
+            vacations = self.db.cursor.fetchall()
+            self.vacations_table.setRowCount(len(vacations) if vacations else 1)
+            if not vacations:
+                self.vacations_table.setItem(0, 0, QTableWidgetItem("لا يوجد طلبات"))
+                for col in range(1, self.vacations_table.columnCount()):
+                    self.vacations_table.setItem(0, col, QTableWidgetItem(""))
+                return
+
+            for row_idx, row in enumerate(vacations):
+                vac_id, emp_name, vac_type, start, end, days, status, dept_approval = row
+                # رقم متسلسل وليس رقم الجدول الفعلي
+                serial_item = QTableWidgetItem(str(row_idx + 1))
+                serial_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.vacations_table.setItem(row_idx, 0, serial_item)
+
+                # باقي الأعمدة
+                items = [
+                    QTableWidgetItem(emp_name if emp_name else ''),
+                    QTableWidgetItem(vac_type if vac_type else ''),
+                    QTableWidgetItem(start if start else ''),
+                    QTableWidgetItem(end if end else ''),
+                    QTableWidgetItem(str(days) if days else ''),
+                    QTableWidgetItem(status if status else ''),
+                    QTableWidgetItem(dept_approval if dept_approval else ''),
+                ]
+
+                # تمييز الصف حسب الحالة
+                for col, item in enumerate(items, start=1):
+                    if status == "موافق":
+                        # أخضر هافت
+                        item.setBackground(QBrush(QColor(200, 255, 200)))
+                        item.setForeground(QBrush(QColor(0, 60, 0)))
+                    elif status == "مرفوض":
+                        item.setBackground(QBrush(QColor(255, 193, 193)))
+                        item.setForeground(QBrush(QColor(120, 0, 0)))
+                    elif status == "ملغاة":
+                        item.setBackground(QBrush(QColor(220, 220, 220)))
+                    elif status == "تحت الإجراء":
+                        item.setBackground(QBrush(QColor(255, 255, 180)))
+                    self.vacations_table.setItem(row_idx, col, item)
+
+                show_action = False
+                if self.user_role == "department_head" and dept_approval == "تحت الإجراء":
+                    show_action = True
+                elif self.user_role == "manager" and status == "تحت الإجراء" and dept_approval == "موافق":
+                    show_action = True
+
+                if show_action:
+                    approve_btn = QPushButton("موافقة")
+                    reject_btn = QPushButton("رفض")
+                    cancel_btn = QPushButton("إلغاء")
+                    approve_btn.setStyleSheet("background-color:#22c55e; color:white; font-weight:bold; border-radius:7px")
+                    reject_btn.setStyleSheet("background-color:#ef4444; color:white; font-weight:bold; border-radius:7px")
+                    cancel_btn.setStyleSheet("background-color:#64748b; color:white; font-weight:bold; border-radius:7px")
+                    approve_btn.clicked.connect(lambda _, v_id=vac_id: self.approve_vacation(v_id))
+                    reject_btn.clicked.connect(lambda _, v_id=vac_id: self.reject_vacation(v_id))
+                    cancel_btn.clicked.connect(lambda _, v_id=vac_id: self.cancel_vacation(v_id))
+                    self.vacations_table.setCellWidget(row_idx, 8, approve_btn)
+                    self.vacations_table.setCellWidget(row_idx, 9, reject_btn)
+                    self.vacations_table.setCellWidget(row_idx, 10, cancel_btn)
+                else:
+                    self.vacations_table.setCellWidget(row_idx, 8, QLabel("-"))
+                    self.vacations_table.setCellWidget(row_idx, 9, QLabel("-"))
+                    self.vacations_table.setCellWidget(row_idx, 10, QLabel("-"))
         except Exception as e:
-            print(f"Error updating notification count: {e}")
+            QMessageBox.critical(self, "خطأ", f"خطأ أثناء تحميل الإجازات:\n{e}")
+
+    def approve_vacation(self, vac_id):
+        try:
+            if self.user_role == "department_head":
+                self.db.execute_query(
+                    "UPDATE vacations SET dept_approval='موافق' WHERE id=?",
+                    (vac_id,), commit=True
+                )
+            else:
+                self.db.execute_query("SELECT employee_id, type, duration FROM vacations WHERE id=?", (vac_id,), commit=False)
+                emp_id, vac_type, duration = self.db.cursor.fetchone()
+                if vac_type == "سنوية":
+                    self.db.execute_query(
+                        "UPDATE employees SET vacation_balance = vacation_balance - ? WHERE id = ?",
+                        (duration, emp_id), commit=True
+                    )
+                if vac_type == "طارئة":
+                    self.db.execute_query(
+                        "UPDATE employees SET emergency_vacation_balance = emergency_vacation_balance - ? WHERE id = ?",
+                        (duration, emp_id), commit=True
+                    )
+                self.db.execute_query(
+                    "UPDATE vacations SET status='موافق' WHERE id=?",
+                    (vac_id,), commit=True
+                )
+            QMessageBox.information(self, "تمت الموافقة", "تمت الموافقة على الإجازة.")
+            self.load_vacations()
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"خطأ أثناء الموافقة: {e}")
+
+    def reject_vacation(self, vac_id):
+        try:
+            if self.user_role == "department_head":
+                self.db.execute_query(
+                    "UPDATE vacations SET dept_approval='مرفوض' WHERE id=?",
+                    (vac_id,), commit=True
+                )
+            else:
+                self.db.execute_query(
+                    "UPDATE vacations SET status='مرفوض' WHERE id=?",
+                    (vac_id,), commit=True
+                )
+            QMessageBox.information(self, "تم الرفض", "تم رفض الإجازة.")
+            self.load_vacations()
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"خطأ أثناء الرفض: {e}")
+
+    def cancel_vacation(self, vac_id):
+        try:
+            self.db.execute_query(
+                "UPDATE vacations SET status='ملغاة', dept_approval='ملغاة' WHERE id=?",
+                (vac_id,), commit=True
+            )
+            self.db.execute_query("SELECT employee_id, type, duration FROM vacations WHERE id=?", (vac_id,), commit=False)
+            emp_id, vac_type, duration = self.db.cursor.fetchone()
+            if vac_type == "سنوية":
+                self.db.execute_query(
+                    "UPDATE employees SET vacation_balance = vacation_balance + ? WHERE id = ?",
+                    (duration, emp_id), commit=True
+                )
+            if vac_type == "طارئة":
+                self.db.execute_query(
+                    "UPDATE employees SET emergency_vacation_balance = emergency_vacation_balance + ? WHERE id = ?",
+                    (duration, emp_id), commit=True
+                )
+            QMessageBox.information(self, "تم الإلغاء", "تم إلغاء الإجازة.")
+            self.load_vacations()
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"خطأ أثناء الإلغاء: {e}")

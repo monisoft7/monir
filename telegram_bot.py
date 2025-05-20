@@ -11,13 +11,6 @@ import logging
 from datetime import datetime, timedelta
 from PyQt6.QtCore import QDate
 
-# Logging configuration
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
 # Conversation states
 (
     PASSWORD, NATIONAL_ID, SERIAL_NUMBER, MAIN_MENU,
@@ -27,6 +20,12 @@ logger = logging.getLogger(__name__)
 
 BOT_PASSWORD = "adw2025"
 
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 class EmployeeQueryBot:
     def __init__(self, token, db_manager):
         self.token = token
@@ -35,7 +34,7 @@ class EmployeeQueryBot:
 
     def setup_handlers(self):
         self.application = ApplicationBuilder().token(self.token).build()
-    
+
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('start', self.start)],
             states={
@@ -44,7 +43,7 @@ class EmployeeQueryBot:
                 SERIAL_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_serial_number)],
                 MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_main_menu)],
                 VACATION_TYPE: [
-                    MessageHandler(filters.Regex("^(سنوية|وفاة|حج|زواج|وضع|مرضية|↩️ رجوع|إلغاء)$"), self.handle_vacation_type),
+                    MessageHandler(filters.Regex("^(سنوية|طارئة|وفاة|حج|زواج|وضع|مرضية|↩️ رجوع|إلغاء)$"), self.handle_vacation_type),
                     MessageHandler(filters.Regex("^(وضع عادي|وضع توأم)$"), self.handle_vacation_subtype)
                 ],
                 VACATION_DEATH_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_vacation_death_type)],
@@ -60,6 +59,10 @@ class EmployeeQueryBot:
             allow_reentry=True
         )
         self.application.add_handler(conv_handler)
+        self.application.add_error_handler(self.error_handler)
+
+    async def error_handler(self, update, context):
+        logger.error(f"حدث خطأ في البوت: {context.error}")
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
@@ -90,7 +93,6 @@ class EmployeeQueryBot:
             await update.message.reply_text("بيانات غير صحيحة، الرجاء المحاولة مرة أخرى", reply_markup=ReplyKeyboardMarkup([["إلغاء"]], resize_keyboard=True))
             return ConversationHandler.END
         context.user_data['employee'] = employee
-        # حفظ emp_id للاستخدام في show_work_days
         context.user_data['employee_id'] = employee['id']
         await self.show_main_menu(update)
         return MAIN_MENU
@@ -115,19 +117,24 @@ class EmployeeQueryBot:
         if text.startswith("❌ إلغاء الإجازة"):
             try:
                 vac_id = int(text.replace("❌ إلغاء الإجازة", "").strip())
-                self.db.execute_query("SELECT type, duration, status FROM vacations WHERE id=? AND employee_id=?", (vac_id, context.user_data['employee']['id']))
+                self.db.execute_query("SELECT type, duration, status, dept_approval FROM vacations WHERE id=? AND employee_id=?", (vac_id, context.user_data['employee']['id']))
                 row = self.db.cursor.fetchone()
                 if not row:
                     await update.message.reply_text("تعذر العثور على الإجازة.")
                     return MAIN_MENU
-                vac_type, duration, status = row
-                if status != "approved":
-                    await update.message.reply_text("لا يمكن إلغاء إلا الإجازات الموافق عليها فقط.")
+                vac_type, duration, status, dept_approval = row
+                if status not in ("تحت الإجراء", "موافق") or dept_approval in ("مرفوض", "ملغاة"):
+                    await update.message.reply_text("لا يمكن إلغاء إلا الإجازات التي لم تُنفذ أو لم تُرفض أو تُلغى بالفعل.")
                     return MAIN_MENU
-                self.db.execute_query("UPDATE vacations SET status='canceled' WHERE id=?", (vac_id,))
+                self.db.execute_query("UPDATE vacations SET status='ملغاة', dept_approval='ملغاة' WHERE id=?", (vac_id,))
                 if vac_type == "سنوية":
                     self.db.execute_query(
                         "UPDATE employees SET vacation_balance = vacation_balance + ? WHERE id = ?",
+                        (duration, context.user_data['employee']['id'])
+                    )
+                if vac_type == "طارئة":
+                    self.db.execute_query(
+                        "UPDATE employees SET emergency_vacation_balance = emergency_vacation_balance + ? WHERE id = ?",
                         (duration, context.user_data['employee']['id'])
                     )
                 await update.message.reply_text("تم إلغاء الإجازة بنجاح وتم استرجاع الأيام للرصيد.")
@@ -164,7 +171,7 @@ class EmployeeQueryBot:
 
     async def show_vacation_types(self, update: Update):
         keyboard = [
-            ["سنوية", "وفاة", "حج"],
+            ["سنوية", "طارئة", "وفاة", "حج"],
             ["زواج", "وضع", "مرضية"],
             ["↩️ رجوع", "إلغاء"]
         ]
@@ -181,6 +188,13 @@ class EmployeeQueryBot:
             await self.show_main_menu(update)
             return MAIN_MENU
         context.user_data['vacation'] = {"type": vac_type}
+        if vac_type == "طارئة":
+            context.user_data['date_step'] = 'year'
+            await update.message.reply_text(
+                "الرجاء إدخال سنة بداية الإجازة (مثال: 2025):",
+                reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
+            )
+            return VACATION_DATE
         if vac_type == "وفاة":
             keyboard = [["وفاة من الدرجة الأولى", "وفاة من الدرجة الثانية"], ["↩️ رجوع", "إلغاء"]]
             await update.message.reply_text(
@@ -198,7 +212,7 @@ class EmployeeQueryBot:
         else:
             context.user_data['date_step'] = 'year'
             await update.message.reply_text(
-                "الرجاء إدخال سنة بداية الإجازة (مثال: 2023):",
+                "الرجاء إدخال سنة بداية الإجازة (مثال: 2025):",
                 reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
             )
             return VACATION_DATE
@@ -213,7 +227,7 @@ class EmployeeQueryBot:
         context.user_data['vacation']['subtype'] = subtype
         context.user_data['date_step'] = 'year'
         await update.message.reply_text(
-            "الرجاء إدخال سنة بداية الإجازة (مثال: 2023):",
+            "الرجاء إدخال سنة بداية الإجازة (مثال: 2025):",
             reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
         )
         return VACATION_DATE
@@ -224,7 +238,6 @@ class EmployeeQueryBot:
             await update.message.reply_text("لم أستطع تحديد الموظف. يرجى التأكد من اختيار الموظف أولاً.")
             return
 
-        # جلب أيام العمل من قاعدة البيانات
         self.db.execute_query("SELECT work_days FROM employees WHERE id = ?", (emp_id,))
         result = self.db.cursor.fetchone()
         if not result:
@@ -235,7 +248,6 @@ class EmployeeQueryBot:
         if work_days == "الندب" or work_days == "تفرغ":
             await update.message.reply_text(f"حالة الموظف: {work_days}")
         elif work_days:
-            # تحويل النص لقائمة أيام وفترات
             days_map = {
                 "0": "السبت", "1": "الأحد", "2": "الإثنين",
                 "3": "الثلاثاء", "4": "الأربعاء", "5": "الخميس", "6": "الجمعة"
@@ -249,8 +261,6 @@ class EmployeeQueryBot:
             await update.message.reply_text(msg)
         else:
             await update.message.reply_text("لا توجد بيانات أيام عمل لهذا الموظف.")
-
-
 
     async def handle_vacation_death_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message.text == "إلغاء":
@@ -278,7 +288,7 @@ class EmployeeQueryBot:
             context.user_data['vacation']['duration'] = 3
             context.user_data['date_step'] = 'year'
             await update.message.reply_text(
-                "الرجاء إدخال سنة الوفاة (مثال: 2023):",
+                "الرجاء إدخال سنة الوفاة (مثال: 2025):",
                 reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
             )
             return VACATION_DATE
@@ -301,7 +311,7 @@ class EmployeeQueryBot:
             context.user_data['vacation']['duration'] = 7
         context.user_data['date_step'] = 'year'
         await update.message.reply_text(
-            "الرجاء إدخال سنة الوفاة (مثال: 2023):",
+            "الرجاء إدخال سنة الوفاة (مثال: 2025):",
             reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
         )
         return VACATION_DATE
@@ -387,6 +397,12 @@ class EmployeeQueryBot:
                         reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
                     )
                     return VACATION_DURATION
+                elif vac_type == "طارئة":
+                    await update.message.reply_text(
+                        "أدخل عدد أيام الإجازة الطارئة (1-3):",
+                        reply_markup=ReplyKeyboardMarkup([["1", "2", "3"], ["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
+                    )
+                    return VACATION_DURATION
                 elif vac_type == "وضع":
                     subtype = context.user_data['vacation'].get('subtype', 'وضع عادي')
                     if subtype == "وضع توأم":
@@ -399,11 +415,13 @@ class EmployeeQueryBot:
                     elif vac_type == "زواج":
                         context.user_data['vacation']['duration'] = 14
 
-                end_date = (QDate(year, month, day).addDays(context.user_data['vacation']['duration'] - 1)).toString("yyyy-MM-dd")
-                context.user_data['vacation']['end_date'] = end_date
-                if 'date_step' in context.user_data:
-                    del context.user_data['date_step']
-                return await self.show_vacation_summary(update, context)
+                if 'duration' in context.user_data['vacation']:
+                    duration = context.user_data['vacation']['duration']
+                    end_date = (QDate(year, month, day).addDays(duration - 1)).toString("yyyy-MM-dd")
+                    context.user_data['vacation']['end_date'] = end_date
+                    if 'date_step' in context.user_data:
+                        del context.user_data['date_step']
+                    return await self.show_vacation_summary(update, context)
             return VACATION_DATE
         except Exception as e:
             await update.message.reply_text(
@@ -431,6 +449,14 @@ class EmployeeQueryBot:
             elif vac_type == "مرضية":
                 if duration < 1:
                     raise ValueError("مدة الإجازة المرضية يجب أن تكون يوم واحد على الأقل")
+            elif vac_type == "طارئة":
+                if not 1 <= duration <= 3:
+                    raise ValueError("مدة الإجازة الطارئة يجب أن تكون من 1 إلى 3 أيام")
+                self.db.execute_query("SELECT emergency_vacation_balance FROM employees WHERE id=?", (context.user_data['employee']['id'],))
+                balance = self.db.cursor.fetchone()[0]
+                if duration > balance:
+                    await update.message.reply_text("رصيد الإجازة الطارئة غير كافٍ (يتبقى لك أقل من المطلوب).")
+                    return MAIN_MENU
             context.user_data['vacation']['duration'] = duration
             if 'start_date' in context.user_data['vacation']:
                 start_date = QDate.fromString(context.user_data['vacation']['start_date'], "yyyy-MM-dd")
@@ -473,8 +499,6 @@ class EmployeeQueryBot:
         )
         return CONFIRM_REQUEST
 
-
-
     async def confirm_request(self, update, context):
         if 'employee' not in context.user_data:
             await update.message.reply_text("حدث خطأ: لم يتم اختيار الموظف، يرجى البدء من جديد.")
@@ -489,7 +513,6 @@ class EmployeeQueryBot:
             vacation = context.user_data['vacation']
             emp_id = context.user_data['employee']['id']
 
-            # بناء التواريخ إذا ناقصة
             if 'start_date' not in vacation:
                 if all(k in vacation for k in ('year', 'month', 'day')):
                     start_date = f"{vacation['year']}-{vacation['month']:02d}-{vacation['day']:02d}"
@@ -501,12 +524,10 @@ class EmployeeQueryBot:
                 end_dt = start_dt + timedelta(days=vacation['duration'] - 1)
                 vacation['end_date'] = end_dt.strftime("%Y-%m-%d")
 
-            # تحديد الحالة الافتراضية للإجازة
             status = 'تحت الإجراء'
-            if vacation['type'] in ["مرضية", "وضع"]:
-                status = 'موافق'  # الموافقة تلقائيًا للإجازات المرضية والوضع
+            dept_approval = 'تحت الإجراء'
+            dept_approver = None
 
-            # إضافة الملاحظة تلقائيًا حسب النوع
             notes = vacation.get('notes', '').strip() if vacation.get('notes') else ""
             extra_note = ""
             if vacation['type'] == "مرضية":
@@ -516,15 +537,24 @@ class EmployeeQueryBot:
             if extra_note:
                 notes = (notes + "\n" if notes else "") + extra_note
 
-            # حفظ الطلب في قاعدة البيانات
-            self.db.execute_query(
-                "INSERT INTO vacations (employee_id, type, relation, start_date, end_date, duration, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (emp_id, vacation['type'], vacation.get('relation'), vacation['start_date'], vacation['end_date'], vacation['duration'], notes, status)
-            )
+            # تحقق من الرصيد مرة أخرى للطوارئ والسنوية
+            if vacation['type'] == "طارئة":
+                self.db.execute_query("SELECT emergency_vacation_balance FROM employees WHERE id=?", (emp_id,))
+                balance = self.db.cursor.fetchone()[0]
+                if vacation['duration'] > balance:
+                    await update.message.reply_text("رصيد الإجازة الطارئة غير كافٍ (يتبقى لك أقل من المطلوب).")
+                    return MAIN_MENU
+            if vacation['type'] == "سنوية":
+                self.db.execute_query("SELECT vacation_balance FROM employees WHERE id=?", (emp_id,))
+                balance = self.db.cursor.fetchone()[0]
+                if vacation['duration'] > balance:
+                    await update.message.reply_text("رصيد الإجازة السنوية غير كافٍ.")
+                    return MAIN_MENU
 
-            # إرسال إشعار إلى المدير عند الموافقة التلقائية
-            if status == "موافق":
-                self.notify_manager(emp_id, vacation['type'], vacation['start_date'], vacation['end_date'])
+            self.db.execute_query(
+                "INSERT INTO vacations (employee_id, type, relation, start_date, end_date, duration, notes, status, dept_approval, dept_approver) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (emp_id, vacation['type'], vacation.get('relation'), vacation['start_date'], vacation['end_date'], vacation['duration'], notes, status, dept_approval, dept_approver)
+            )
 
             await update.message.reply_text(
                 f"✅ تم تقديم طلب الإجازة بنجاح\n"
@@ -544,47 +574,44 @@ class EmployeeQueryBot:
             )
             return ConversationHandler.END
 
-
-    # مثال لدالة إدخال رقم وطني (طبق هذا في كل دوال الحقول الحساسة)
-    async def ask_national_id(self, update, context):
-        user_input = update.message.text.strip()
-        if user_input == "إلغاء":
-            await update.message.reply_text("تم الإلغاء.")
-            return ConversationHandler.END
-
-
-    async def show_vacation_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.message.text == "↩️ رجوع" or update.message.text == "إلغاء":
-            await self.show_main_menu(update)
-            return MAIN_MENU
+    async def show_vacation_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             self.db.execute_query("""
-                SELECT vacation_balance 
-                FROM employees 
-                WHERE id = ?
+                SELECT id, type, start_date, end_date, duration, status, dept_approval
+                FROM vacations
+                WHERE employee_id = ?
+                ORDER BY start_date DESC
+                LIMIT 10
             """, (context.user_data['employee']['id'],))
-            balance = self.db.cursor.fetchone()[0]
-            await update.message.reply_text(
-                f"✈️ رصيد الإجازات: {balance} يوم حتى تاريخ 31/12/2024",
-                reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
-            )
-            return MAIN_MENU
-        except Exception as e:
-            await update.message.reply_text(f"حدث خطأ: {str(e)}")
-            return MAIN_MENU
-
-
+            records = self.db.cursor.fetchall()
+            if not records:
+                await update.message.reply_text(
+                    "لا يوجد سجل إجازات",
+                    reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
+                )
+                return MAIN_MENU
             keyboard = []
             response = "📋 سجل الإجازات (آخر 10 إجازات):\n\n"
             for rec in records:
-                vac_id, vac_type, start, end, days, status = rec
+                vac_id, vac_type, start, end, days, status, dept_approval = rec
                 response += (
                     f"📅 {start} إلى {end}\n"
                     f"• النوع: {vac_type}\n"
                     f"• المدة: {days} يوم\n"
-                    f"• الحالة: {status}\n"
                 )
-                if status == "approved":
+
+                # الحالة الموحدة للموظف
+                if status == "موافق":
+                    response += "• تم الموافقة على الإجازة\n"
+                elif status == "مرفوض":
+                    response += "• تم رفض الإجازة\n"
+                elif status == "ملغاة":
+                    response += "• تم إلغاء الإجازة\n"
+                else:
+                    response += "• في انتظار موافقة الإدارة\n"
+
+                # زر إلغاء فقط إذا الإجازة قيد الإجراء أو مقبولة
+                if status in ("تحت الإجراء", "موافق"):
                     keyboard.append([f"❌ إلغاء الإجازة {vac_id}"])
                 response += "\n"
             keyboard.append(["↩️ رجوع", "إلغاء"])
@@ -603,10 +630,10 @@ class EmployeeQueryBot:
             return MAIN_MENU
         try:
             self.db.execute_query("""
-                SELECT date, type, duration 
-                FROM absences 
+                SELECT date, type, duration
+                FROM absences
                 WHERE employee_id = ?
-                ORDER BY date DESC 
+                ORDER BY date DESC
                 LIMIT 30
             """, (context.user_data['employee']['id'],))
             records = self.db.cursor.fetchall()
@@ -634,8 +661,8 @@ class EmployeeQueryBot:
             return MAIN_MENU
         try:
             self.db.execute_query("""
-                SELECT job_grade, grade_date, bonus 
-                FROM employees 
+                SELECT job_grade, grade_date, bonus
+                FROM employees
                 WHERE id = ?
             """, (context.user_data['employee']['id'],))
             grade, grade_date, bonus = self.db.cursor.fetchone()
@@ -660,13 +687,14 @@ class EmployeeQueryBot:
             return MAIN_MENU
         try:
             self.db.execute_query("""
-                SELECT vacation_balance 
-                FROM employees 
+                SELECT vacation_balance, emergency_vacation_balance
+                FROM employees
                 WHERE id = ?
             """, (context.user_data['employee']['id'],))
-            balance = self.db.cursor.fetchone()[0]
+            balance, emg_balance = self.db.cursor.fetchone()
             await update.message.reply_text(
-                f"✈️ رصيد الإجازات: {balance} يوم",
+                f"✈️ رصيد الإجازات السنوية: {balance} يوم حتى تاريخ 31/12/2024\n"
+                f"🚨 رصيد الإجازة الطارئة: {emg_balance} يوم حتى تاريخ 31/12/2024",
                 reply_markup=ReplyKeyboardMarkup([["↩️ رجوع", "إلغاء"]], resize_keyboard=True)
             )
             return MAIN_MENU
@@ -692,8 +720,6 @@ class EmployeeQueryBot:
         )
         return MAIN_MENU
 
-
-
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "تم إلغاء العملية والعودة للقائمة الرئيسية.",
@@ -705,8 +731,8 @@ class EmployeeQueryBot:
     def get_employee(self, national_id: str, serial_number: str) -> dict:
         try:
             self.db.execute_query("""
-                SELECT id, name, national_id, department, 
-                       job_grade, hiring_date, vacation_balance
+                SELECT id, name, national_id, department,
+                       job_grade, hiring_date, vacation_balance, emergency_vacation_balance
                 FROM employees
                 WHERE national_id=? AND serial_number=?
             """, (national_id, serial_number))
@@ -718,7 +744,8 @@ class EmployeeQueryBot:
                     'department': row[3],
                     'job_grade': row[4],
                     'hiring_date': row[5],
-                    'vacation_balance': row[6]
+                    'vacation_balance': row[6],
+                    'emergency_vacation_balance': row[7]
                 }
         except Exception as e:
             logger.error(f"Error fetching employee: {str(e)}")
